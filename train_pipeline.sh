@@ -16,8 +16,8 @@ set -e
 # Wandb configuration
 # To disable wandb: export WANDB_MODE=offline
 # To enable wandb: comment out the line below or set WANDB_MODE=online
-# export WANDB_MODE=offline
-export WANDB_SILENT=false
+export WANDB_MODE=offline
+export WANDB_SILENT=true
 
 # Configuration
 START_STEP=${1:-100000}
@@ -32,17 +32,20 @@ else
 fi
 CHUNK_SIZE=50000
 
+# Model backup directory
+BACKUP_DIR=~/crate/models
+
 # Training hyperparameters (adjust for your GPU)
-DEPTH=12
+DEPTH=20
 ASPECT_RATIO=64
 MAX_SEQ_LEN=1024
-DEVICE_BATCH_SIZE=24
-TOTAL_BATCH_SIZE=49152  # Must be divisible by (24 × 1024 = 24,576)
+DEVICE_BATCH_SIZE=32
+TOTAL_BATCH_SIZE=524288  # Must be divisible by (24 × 1024 = 24,576)
 
 # Mid/SFT hyperparameters
-MID_DEVICE_BATCH=24
+MID_DEVICE_BATCH=32
 MID_SEQ_LEN=1024
-MID_TOTAL_BATCH=24576
+MID_TOTAL_BATCH=524288
 
 # Colors
 GREEN='\033[0;32m'
@@ -50,7 +53,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-cd /home/robel/nanoCRATE/nanochat
+cd ~/crate/nanochat-crate-a
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}CRATE Training Pipeline${NC}"
@@ -65,6 +68,10 @@ if [ $START_STEP -eq 0 ]; then
     echo -e "${GREEN}Starting fresh training (step 0) - no model will be loaded${NC}"
     mkdir -p ~/.cache/nanochat/${MODEL_FOLDER}
 fi
+
+# Create backup directory
+mkdir -p ${BACKUP_DIR}/${MODEL_FOLDER}
+echo -e "${GREEN}Backup directory: ${BACKUP_DIR}/${MODEL_FOLDER}${NC}"
 
 CURRENT_STEP=$START_STEP
 
@@ -103,6 +110,10 @@ while [ $CURRENT_STEP -lt $END_STEP ]; do
     # Execute the command
     eval $BASE_TRAIN_CMD
     
+    # Backup base model checkpoint
+    echo -e "${GREEN}Backing up base model checkpoint to ${BACKUP_DIR}/${MODEL_FOLDER}/${NC}"
+    rsync -av --progress ~/.cache/nanochat/${MODEL_FOLDER}/ ${BACKUP_DIR}/${MODEL_FOLDER}/
+    
     echo ""
     echo -e "${YELLOW}========================================${NC}"
     echo -e "${YELLOW}Phase: Midtraining (after ${NEXT_STEP} steps)${NC}"
@@ -116,6 +127,10 @@ while [ $CURRENT_STEP -lt $END_STEP ]; do
         --model_tag=$MODEL_FOLDER \
         --run=${MODEL_FOLDER}-mid-${NEXT_STEP}
     
+    # Backup after midtraining
+    echo -e "${YELLOW}Backing up mid-trained model to ${BACKUP_DIR}/${MODEL_FOLDER}/${NC}"
+    rsync -av --progress ~/.cache/nanochat/${MODEL_FOLDER}/ ${BACKUP_DIR}/${MODEL_FOLDER}/
+    
     echo ""
     echo -e "${YELLOW}========================================${NC}"
     echo -e "${YELLOW}Phase: SFT (after ${NEXT_STEP} steps)${NC}"
@@ -126,6 +141,9 @@ while [ $CURRENT_STEP -lt $END_STEP ]; do
         --model_tag=$MODEL_FOLDER \
         --run=${MODEL_FOLDER}-sft-${NEXT_STEP}
     
+    # Backup after SFT
+    echo -e "${YELLOW}Backing up SFT model to ${BACKUP_DIR}/${MODEL_FOLDER}/${NC}"
+    rsync -av --progress ~/.cache/nanochat/${MODEL_FOLDER}/ ${BACKUP_DIR}/${MODEL_FOLDER}/
     
     echo ""
     echo -e "${GREEN}✓ Completed cycle: ${NEXT_STEP} steps + mid + sft${NC}"
@@ -140,6 +158,7 @@ echo -e "${BLUE}✓ Pipeline complete!${NC}"
 echo -e "${BLUE}Final base training: ${END_STEP} steps${NC}"
 echo -e "${BLUE}Model folder: ${MODEL_FOLDER}${NC}"
 echo -e "${BLUE}Model path: ~/.cache/nanochat/${MODEL_FOLDER}/${NC}"
+echo -e "${BLUE}Backup path: ${BACKUP_DIR}/${MODEL_FOLDER}/${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo "To chat with your model:"
